@@ -2,8 +2,11 @@ import time
 import tensorflow as tf
 from transformer import Transformer
 from utils import create_masks, loss_function, get_ckpt_manager, CustomSchedule, create_look_ahead_mask
-from preprocess import get_dataset
-import tensorflow_datasets as tfds
+from preprocess import get_dataset, token_decode, token_encode, chem_tokenizer
+tokenizer = chem_tokenizer()
+token_encode_dic = token_encode()
+token_decode_dic = token_decode()
+
 
 
 def train(train_dataset, transformer, epochs, ckpt_manager, optimizer):
@@ -90,7 +93,55 @@ def train(train_dataset, transformer, epochs, ckpt_manager, optimizer):
         print ('Time taken for 1 epoch: {} secs\n'.format(time.time() - start))
 
 
-def evaluate(inp_sentence):
+def evaluate(transformer, inp_sequence, max_length=160):
+    """
+    Given input sequence for encoder and predict target for decoder
+
+    Parameters:
+        inp_sequence (string): input sequence for encoder
+
+    Returns:
+        predict logits: shape = (seq_len, vocab_size)
+
+    """
+    start_token = token_encode_dic["^"]
+    end_token = token_encode_dic["$"]
+    # inp_sentence is product, shape = (len(inp_sentence)+2, )
+    inp_sequence = tokenizer.lookup(tf.strings.bytes_split("^"+inp_sequence+"$"))
+    encoder_input = tf.expand_dims(inp_sequence, 0) # (1, len(inp_sentence)+2)
+
+    # target is reactant，first char is "^"
+    decoder_input = [start_token]
+    output = tf.expand_dims(decoder_input, 0)
+
+    for i in range(max_length):
+        enc_padding_mask, combined_mask, dec_padding_mask = create_masks(
+            encoder_input, output)
+
+        # predictions.shape == (batch_size, seq_len, vocab_size)
+        predictions, attention_weights = transformer(encoder_input,
+                                                     output,
+                                                     False,
+                                                     enc_padding_mask,
+                                                     combined_mask,
+                                                     dec_padding_mask)
+
+        # each time choose last element from seq_len dimension, because sequence is shifted
+        predictions = predictions[:, -1:, :]  # (batch_size, 1, vocab_size)
+
+        predicted_id = tf.cast(tf.argmax(predictions, axis=-1), tf.int32)
+
+        # if predicted_id == ，就返回结果
+        if predicted_id == end_token:
+            return tf.squeeze(output, axis=0), attention_weights
+
+        # each time append predicted_id to output, finaly will get whole target sequence
+        output = tf.concat([output, predicted_id], axis=-1)
+
+    return tf.squeeze(output, axis=0), attention_weights
+
+
+def predict(transformer, inp_sequence, max_length=160):
     """
     Summary line.
 
@@ -103,23 +154,12 @@ def evaluate(inp_sentence):
     int: Description of return value
 
     """
-    pass
 
+    result, attention_weights = evaluate(transformer, inp_sequence, max_length=160)
 
-def predict(sentence):
-    """
-    Summary line.
+    predicted_reactants = [token_decode_dic[int(i)] for i in result.numpy() if i < len(token_decode_dic)]
 
-    Extended description of function.
-
-    Parameters:
-    arg1 (int): Description of arg1
-
-    Returns:
-    int: Description of return value
-
-    """
-    pass
+    return "".join(predicted_reactants)
 
 
 def main():
@@ -157,14 +197,16 @@ def main():
     ckpt_manager = get_ckpt_manager(transformer, optimizer)
 
     # training
-    train(train_dataset, transformer, epochs, ckpt_manager, optimizer)
-
-
+    # train(train_dataset, transformer, epochs, ckpt_manager, optimizer)
 
     # evaluating
 
-    # predicting
 
+    # predicting
+    inp_sequence = "Ic1ccc2n(CC(=O)N3CCCCC3)c3CCN(C)Cc3c2c1"
+    reactant = predict(transformer, inp_sequence, max_length=160)
+    print('Input Product:       {}'.format(inp_sequence))
+    print('Predicted Reactants: {}'.format(reactant))
 
 if __name__ == '__main__':
     main()

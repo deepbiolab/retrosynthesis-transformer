@@ -45,13 +45,30 @@ class TextVectorization(tf.keras.layers.Layer):
         return self.table.lookup(preprocessed_inputs)
 
 
-def chem_tokenizer(vocab_string):
+def chem_tokenizer(
+        vocab_string=" ^#%()+-./0123456789=@ABCDEFGHIKLMNOPRSTVXYZ[\\]abcdefgilmnoprstuy$"):
     vocab = list(vocab_string)
     indices = tf.range(len(vocab), dtype=tf.int64)
     table_init = tf.lookup.KeyValueTensorInitializer(vocab, indices)
     num_oov_buckets = 1
     table = tf.lookup.StaticVocabularyTable(table_init, num_oov_buckets)
     return table
+
+def token_decode(
+        vocab_string=" ^#%()+-./0123456789=@ABCDEFGHIKLMNOPRSTVXYZ[\\]abcdefgilmnoprstuy$"):
+    # tokenizer = chem_tokenizer()
+    #
+    # index = tokenizer.lookup(tf.constant(list(vocab_string))).numpy()
+    # char = list(vocab_string)
+    return {i: ch for i, ch in enumerate(list(vocab_string))}
+
+def token_encode(
+        vocab_string=" ^#%()+-./0123456789=@ABCDEFGHIKLMNOPRSTVXYZ[\\]abcdefgilmnoprstuy$"):
+    # tokenizer = chem_tokenizer()
+    #
+    # index = tokenizer.lookup(tf.constant(list(vocab_string))).numpy()
+    # char = list(vocab_string)
+    return {ch: i for i, ch in enumerate(list(vocab_string))}
 
 
 def get_dataset(trainfile ='data/retrosynthesis-train.smi', validfile='data/retrosynthesis-valid.smi',
@@ -93,6 +110,7 @@ def get_dataset(trainfile ='data/retrosynthesis-train.smi', validfile='data/retr
     valid_dataset = valid_dataset.padded_batch(BATCH_SIZE)
 
     return train_dataset, valid_dataset, len(vocab_string)-2, len(vocab_string)-2
+
 
 
 
