@@ -1,4 +1,6 @@
 import time
+import argparse
+import time
 import tensorflow as tf
 from transformer import Transformer
 from utils import create_masks, loss_function, get_ckpt_manager, CustomSchedule, create_look_ahead_mask
@@ -161,28 +163,41 @@ def predict(transformer, inp_sequence, max_length=160):
 
     return "".join(predicted_reactants)
 
-
 def main():
-    # hyperparameters
+    parser = argparse.ArgumentParser(description="Retrosynthesis Prediction using Transformer")
+    parser.add_argument('--mode', type=str, choices=['train', 'predict'], default='predict',
+                        help='Mode to run the script: train or predict')
+    parser.add_argument('--epochs', type=int, default=20, help='Number of training epochs')
+    parser.add_argument('--batch_size', type=int, default=64, help='Batch size for training')
+    parser.add_argument('--train_file', type=str, default='data/retrosynthesis-train.smi',
+                        help='Path to the training data file')
+    parser.add_argument('--valid_file', type=str, default='data/retrosynthesis-valid.smi',
+                        help='Path to the validation data file')
+    parser.add_argument('--checkpoint_dir', type=str, default='./checkpoints',
+                        help='Directory to save/load checkpoints')
+    parser.add_argument('--input_sequence', type=str, default="Ic1ccc2n(CC(=O)N3CCCCC3)c3CCN(C)Cc3c2c1",
+                        help='Input SMILES string for prediction')
+    args = parser.parse_args()
+
+    # Hyperparameters
     num_layers = 4
     d_model = 128
     dff = 512
     num_heads = 8
     dropout_rate = 0.1
-    epochs = 20
+    epochs = args.epochs
     pe_input, pe_target = 500, 500
 
-    # prepare dataset
-    train_dataset, val_dataset, enc_vocab_size, dec_vocab_size  = get_dataset(
-        trainfile ='data/retrosynthesis-train.smi',
-        validfile='data/retrosynthesis-valid.smi',
-        n_read_threads=5, BUFFER_SIZE=20000, BATCH_SIZE=64)
-
+    # Prepare dataset
+    train_dataset, val_dataset, enc_vocab_size, dec_vocab_size = get_dataset(
+        trainfile=args.train_file,
+        validfile=args.valid_file,
+        n_read_threads=5, BUFFER_SIZE=20000, BATCH_SIZE=args.batch_size)
 
     input_vocab_size = enc_vocab_size + 2
     target_vocab_size = dec_vocab_size + 2
 
-    # build transformer model
+    # Build transformer model
     transformer = Transformer(num_layers, d_model, num_heads, dff,
                               input_vocab_size, target_vocab_size,
                               pe_input=pe_input,
@@ -191,22 +206,35 @@ def main():
 
     # Create optimizer
     learning_rate = CustomSchedule(d_model)
-    optimizer = tf.keras.optimizers.Adam(learning_rate, beta_1=0.9, beta_2=0.98, epsilon=1e-9)
+    optimizer = tf.keras.optimizers.Adam(learning_rate, beta_1=0.9,
+                                         beta_2=0.98, epsilon=1e-9)
 
-    # create model checkpoint
-    ckpt_manager = get_ckpt_manager(transformer, optimizer)
+    # Create model checkpoint
+    ckpt_manager = get_ckpt_manager(transformer, optimizer, checkpoint_dir=args.checkpoint_dir)
 
-    # training
-    # train(train_dataset, transformer, epochs, ckpt_manager, optimizer)
+    # Load latest checkpoint if available
+    if ckpt_manager.latest_checkpoint:
+        ckpt_manager.restore_or_initialize()
+        print(f'Loaded checkpoint from {ckpt_manager.latest_checkpoint}')
+    else:
+        print('Initializing new checkpoints.')
 
-    # evaluating
-
-
-    # predicting
-    inp_sequence = "Ic1ccc2n(CC(=O)N3CCCCC3)c3CCN(C)Cc3c2c1"
-    reactant = predict(transformer, inp_sequence, max_length=160)
-    print('Input Product:       {}'.format(inp_sequence))
-    print('Predicted Reactants: {}'.format(reactant))
+    if args.mode == 'train':
+        print("Starting training...")
+        train(train_dataset, transformer, epochs, ckpt_manager, optimizer)
+        print("Training completed.")
+    elif args.mode == 'predict':
+        # Ensure the model is loaded
+        if not ckpt_manager.latest_checkpoint:
+            print("No checkpoint found. Please train the model first.")
+            return
+        # Perform prediction
+        inp_sequence = args.input_sequence
+        reactant = predict(transformer, inp_sequence, max_length=160)
+        print('Input Product:       {}'.format(inp_sequence))
+        print('Predicted Reactants: {}'.format(reactant))
+    else:
+        print("Invalid mode selected. Choose either 'train' or 'predict'.")
 
 if __name__ == '__main__':
     main()
